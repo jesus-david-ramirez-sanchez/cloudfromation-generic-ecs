@@ -1,0 +1,342 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ProjectName:
+    Type: String
+  EnvType:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - qa
+  MicroserviceName:
+    Type: String
+  MemoryReservation:
+    Type: Number
+  MicroservicePort:
+    Type: Number
+  MicroservicePriority:
+    Type: Number
+  MinContainers:
+    Type: Number
+  MaxContainers:
+    Type: Number
+  Healthcheck:
+    Default: api/healthcheck
+    Type: String
+  PathService:
+    Type: String
+  Initial:
+    Type: String
+
+Conditions:
+  IsProd: !Equals [ !Ref EnvType, prod ]
+  IsNotInitial: !Equals [ !Ref Initial, false ]
+
+Resources:
+  MicroserviceRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-${EnvType}/${MicroserviceName}"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "action": {
+                  "type": "expire"
+                },
+                "selection": {
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5,
+                  "tagStatus": "untagged"
+                },
+                "description": "Keep only 5 untagged image, expire all others",
+                "rulePriority": 1
+              }
+            ]
+          }
+
+#  PutImagePolicy:
+#    Type: AWS::IAM::Policy
+#    Properties:
+#      PolicyName: !Join [ "-", [ !Ref ProjectName, !Ref MicroserviceName, put, image ] ]
+#      PolicyDocument:
+#        Version: "2012-10-17"
+#        Statement:
+#          - Effect: "Allow"
+#            Action:
+#              - ecr:GetAuthorizationToken
+#            Resource:
+#              - "*"
+#          - Effect: "Allow"
+#            Action:
+#              - ecr:GetDownloadUrlForLayer
+#              - ecr:BatchGetImage
+#              - ecr:BatchCheckLayerAvailability
+#              - ecr:PutImage
+#              - ecr:InitiateLayerUpload
+#              - ecr:UploadLayerPart
+#              - ecr:CompleteLayerUpload
+#            Resource:
+#              - !GetAtt MicroserviceRepository.Arn
+#      Groups:
+#        - Fn::ImportValue: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, operators ] ]
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: IsNotInitial
+    Properties:
+      RoleName:
+        !Join [
+          "-",
+          [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, execution ],
+        ]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Effect: Allow
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}/${MicroserviceName}/.env"
+              - Effect: "Allow"
+                Action:
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Condition: IsNotInitial
+    Properties:
+      RoleName:
+        !Join [
+          "-",
+          [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, task ],
+        ]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Effect: Allow
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: s3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                Resource: "arn:aws:s3:::*"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: IsNotInitial
+    Properties:
+      Family:
+        !Join [
+          "-",
+          [
+            !Ref ProjectName,
+            !Ref EnvType,
+            !Ref MicroserviceName,
+            task,
+            definition,
+          ],
+        ]
+      RequiresCompatibilities:
+        - EC2
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      NetworkMode: bridge
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: !Join [ "-", [ !Ref ProjectName, !Ref MicroserviceName ] ]
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MicroserviceRepository}:latest"
+          MemoryReservation: !Ref MemoryReservation
+          PortMappings:
+            - ContainerPort: !Ref MicroservicePort
+          Environment:
+            - Name: NODE_ENV
+              Value: !If [ IsProd, production, test ]
+          EnvironmentFiles:
+            - Value: !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}/${MicroserviceName}/.env"
+              Type: s3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Fn::ImportValue:
+                  !Join [ "-", [ !Ref ProjectName, !Ref EnvType, log, group ] ]
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref MicroserviceName
+
+  MicroserviceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: IsNotInitial
+    Properties:
+      Name: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, inter ] ]
+      TargetType: instance
+      Protocol: HTTP
+      Port: !Ref MicroservicePort
+      VpcId:
+        Fn::ImportValue: !Join [ "-", [ shipping, vpc ] ]
+      HealthCheckPath: !Sub "/${Healthcheck}"
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 50
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+
+  MicroserviceListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: IsNotInitial
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MicroserviceTargetGroup
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - !Sub "/${PathService}/*"
+      ListenerArn:
+        Fn::ImportValue:
+          !Join [ "-", [ !Ref ProjectName, !Ref EnvType, loadbalancer, listener ] ]
+      Priority: !Ref MicroservicePriority
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: IsNotInitial
+    Properties:
+      GroupName:
+        !Join [
+          "-",
+          [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, task ],
+        ]
+      GroupDescription: !Sub "SecurityGroup for ${ProjectName}-${EnvType} Task for ${MicroserviceName}"
+      VpcId:
+        Fn::ImportValue: !Join [ "-", [ shipping, vpc ] ]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref MicroservicePort
+          ToPort: !Ref MicroservicePort
+          SourceSecurityGroupId:
+            Fn::ImportValue:
+              !Join [ "-", [ !Ref ProjectName, !Ref EnvType, loadbalancer, sg ] ]
+      Tags:
+        - Key: Name
+          Value:
+            !Join [
+              "-",
+              [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, task ],
+            ]
+
+  Service:
+    Type: AWS::ECS::Service
+    Condition: IsNotInitial
+    DependsOn:
+      - MicroserviceListenerRule
+    Properties:
+      ServiceName:
+        !Join [
+          "-",
+          [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, service ],
+        ]
+      Cluster:
+        Fn::ImportValue:
+          !Join [ "-", [ !Ref ProjectName, !Ref EnvType, ecs, cluster ] ]
+      TaskDefinition: !Ref TaskDefinition
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 50
+        MaximumPercent: 200
+      DesiredCount: !Ref MinContainers
+      LaunchType: EC2
+      HealthCheckGracePeriodSeconds: 15
+      LoadBalancers:
+        - ContainerName: !Join [ "-", [ !Ref ProjectName, !Ref MicroserviceName ] ]
+          ContainerPort: !Ref MicroservicePort
+          TargetGroupArn: !Ref MicroserviceTargetGroup
+
+  # UpdateServicePolicy:
+  #   Type: AWS::IAM::Policy
+  #   Properties:
+  #     PolicyName: !Join ["-", [!Ref ProjectName, !Ref MicroserviceName, update]]
+  #     PolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: "Allow"
+  #           Action:
+  #             - ecs:UpdateService
+  #           Resource:
+  #             - !Ref Service
+  #     Groups:
+  #       - Fn::ImportValue: !Join ["-", [!Ref ProjectName, !Ref EnvType, operators]]
+
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Condition: IsNotInitial
+    Properties:
+      RoleName:
+        !Join [
+          "-",
+          [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName, autoscale ],
+        ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: IsNotInitial
+    Properties:
+      MinCapacity: !Ref MinContainers
+      MaxCapacity: !Ref MaxContainers
+      ResourceId:
+        Fn::Join:
+          - "/"
+          - - service
+            - Fn::ImportValue:
+                !Join [ "-", [ !Ref ProjectName, !Ref EnvType, ecs, cluster ] ]
+            - !GetAtt Service.Name
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+
+  AutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: IsNotInitial
+    Properties:
+      ScalingTargetId: !Ref AutoScalingTarget
+      PolicyType: TargetTrackingScaling
+      PolicyName: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, autoscaling ] ]
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        ScaleInCooldown: 120
+        ScaleOutCooldown: 70
+        TargetValue: 70

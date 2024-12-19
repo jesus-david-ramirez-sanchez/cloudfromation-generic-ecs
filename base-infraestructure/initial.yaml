@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  ProjectName:
+    Type: String
+  EnvType:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - qa
+  minSize:
+    Type: Number
+  maxSize:
+    Type: Number
+  InstanceType:
+    Type: String
+    Default: t3a.medium
+
+Conditions:
+  IsDev: !Equals
+    - !Ref EnvType
+    - dev
+
+Resources:
+  iam:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvType: !Ref EnvType
+      TemplateURL: stacks/iam.yaml
+
+  vpc:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsDev
+    Properties:
+      Parameters:
+        ProjectName: !Ref ProjectName
+      TemplateURL: stacks/vpc.yaml
+
+  elb:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ProjectName: !Ref ProjectName
+        VpcId: !If
+          - IsDev
+          - !GetAtt vpc.Outputs.VpcId
+          - !ImportValue
+            Fn::Join:
+              - '-'
+              - - !Ref ProjectName
+                - vpc
+        SubnetIds: !If
+          - IsDev
+          - !GetAtt vpc.Outputs.SubnetIds
+          - !ImportValue
+            Fn::Join:
+              - '-'
+              - - !Ref ProjectName
+                - subnets
+        EnvType: !Ref EnvType
+      TemplateURL: stacks/elb.yaml
+
+  cluster:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ProjectName: !Ref ProjectName
+        VpcId: !If
+          - IsDev
+          - !GetAtt vpc.Outputs.VpcId
+          - !ImportValue
+            Fn::Join:
+              - '-'
+              - - !Ref ProjectName
+                - vpc
+        SubnetIds: !If
+          - IsDev
+          - !GetAtt vpc.Outputs.SubnetIds
+          - !ImportValue
+            Fn::Join:
+              - '-'
+              - - !Ref ProjectName
+                - subnets
+        EnvType: !Ref EnvType
+        LoadBalancerSecurityGroup: !GetAtt elb.Outputs.LoadBalancerSecurityGroup
+        minSize: !Ref minSize
+        maxSize: !Ref maxSize
+        InstanceType: !Ref InstanceType
+      TemplateURL: stacks/cluster.yaml
+
+Outputs:
+  LoadBalancerURL:
+    Value: !GetAtt elb.Outputs.LoadBalancerURL

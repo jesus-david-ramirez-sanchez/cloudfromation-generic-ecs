@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ProjectName:
+    Type: String
+
+Resources:
+  # This is a VPC (Virtual Private Cloud) resource definition in AWS CloudFormation.
+  # A VPC is a virtual network dedicated to your AWS account. It is logically isolated from other virtual networks in the AWS Cloud.
+  VPC:
+    Type: AWS::EC2::VPC  # The AWS CloudFormation resource type that is being defined.
+    Properties:
+      CidrBlock: 10.0.0.0/16  # The IPv4 network range for the VPC, in CIDR notation.
+      EnableDnsSupport: true  # Indicates whether the DNS resolution is supported for the VPC.
+      EnableDnsHostnames: true  # Indicates whether the instances that are associated with this VPC get public DNS hostnames.
+      InstanceTenancy: default  # The allowed tenancy of instances launched into the VPC. The 'default' means instances can be with any tenancy.
+      Tags: # Metadata to assign to the VPC.
+        - Key: Name  # The key name of the tag.
+          Value: !Join [ "-", [ !Ref ProjectName, vpc ] ]  # The value of the tag, which is a combination of the project name, environment type, and the string 'vpc'.
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName,  igw]]
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName,  public, rtb]]
+
+  InternetGatewayRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC.CidrBlock, 3, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName, public, subnet, a]]
+
+  RouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC.CidrBlock, 3, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName, public, subnet, b]]
+
+  RouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC.CidrBlock, 3, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName, public, subnet, c]]
+
+  RouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetC
+      RouteTableId: !Ref PublicRouteTable
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, vpc]]
+
+  VpcCidrBlock:
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: !Join [ "-", [ !Ref ProjectName, CidrBlock, vpc ] ]
+
+  SubnetIds:
+    Value: !Join [",", [!Ref SubnetA, !Ref SubnetB, !Ref SubnetC]]
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, subnets]]
+
+  InternetGateway:
+    Value: !GetAtt InternetGateway.InternetGatewayId
+    Export:
+      Name: !Join [ "-", [ !Ref ProjectName, igw ] ]
+
+  PublicRouteTable:
+    Value: !GetAtt PublicRouteTable.RouteTableId
+    Export:
+      Name: !Join [ "-", [ !Ref ProjectName, public, rtb ] ]

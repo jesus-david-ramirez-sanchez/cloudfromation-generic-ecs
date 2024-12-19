@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ProjectName:
+    Type: String
+  EnvType:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  ECSAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+  InstanceType:
+    Type: String
+    Default: t3a.medium
+  LoadBalancerSecurityGroup:
+    Type: String
+  minSize:
+    Type: Number
+  maxSize:
+    Type: Number
+
+Resources:
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, cluster ] ]
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, cluster ] ]
+
+  ECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: ECSCluster
+    Properties:
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchConfigurationName: !Ref ECSInstanceLaunchConfiguration
+      MinSize: !Ref minSize
+      MaxSize: !Ref maxSize
+      DesiredCapacity: !Ref minSize
+      MetricsCollection:
+        - Granularity: 1Minute
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref minSize
+        Timeout: PT5M
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: true
+
+  ECSInstanceLaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref ECSAMI
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref ECSInstanceProfile
+      InstanceMonitoring: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+          yum install -y aws-cfn-bootstrap
+          /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSAutoScalingGroup
+      AssociatePublicIpAddress: true
+      SecurityGroups:
+        - !Ref ECSInstanceSecurityGroup
+
+
+  ECSInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "SecurityGroup for ${ProjectName} ECS Instance"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName, !Ref EnvType, sg]]
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ECSInstanceRole
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-${EnvType}"
+      RetentionInDays: 30
+
+Outputs:
+  ECSSg:
+    Value: !Ref ECSInstanceSecurityGroup
+    Export:
+      Name: !Join [ "-", [ !Ref ProjectName, !Ref EnvType ,ecs, sg ] ]
+
+  ECSCluster:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType ,ecs, cluster]]
+
+  LogGroup:
+    Value: !Ref LogGroup
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType, log, group]]
