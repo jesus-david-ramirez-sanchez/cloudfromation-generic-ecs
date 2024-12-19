@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  ECSAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+  InstanceType:
+    Type: String
+    Default: t3a.small
+  EnvType:
+    Type: String
+
+Resources:
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer]]
+      GroupDescription: !Sub "SecurityGroup for ${ProjectName} ${EnvType} LoadBalancer"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 578
+          ToPort: 578
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer]]
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType]]
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: !Ref SubnetIds
+      LoadBalancerAttributes:
+        - Key: routing.http2.enabled
+          Value: "false"
+        - Key: deletion_protection.enabled
+          Value: "false"
+        - Key: idle_timeout.timeout_seconds
+          Value: "120"
+        - Key: access_logs.s3.enabled
+          Value: "false"
+
+  DefaultListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTPS
+      Port: 578
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "404"
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+
+
+Outputs:
+  LoadBalancer:
+    Value: !Ref LoadBalancer
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer]]
+  LoadBalancerURL:
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer, url]]
+  LoadBalancerSecurityGroup:
+    Value: !Ref LoadBalancerSecurityGroup
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer, sg]]
+  DefaultListener:
+    Value: !Ref DefaultListener
+    Export:
+      Name: !Join ["-", [!Ref ProjectName, !Ref EnvType, loadbalancer, listener]]
