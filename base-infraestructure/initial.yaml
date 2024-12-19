@@ -15,7 +15,9 @@ Parameters:
     Type: Number
   InstanceType:
     Type: String
-    Default: t3a.medium
+    Default: t3a.nano
+  SSLCertificate:
+    Type: String
 
 Conditions:
   IsDev: !Equals
@@ -44,6 +46,7 @@ Resources:
     Properties:
       Parameters:
         ProjectName: !Ref ProjectName
+        SSLCertificate: !Ref SSLCertificate
         VpcId: !If
           - IsDev
           - !GetAtt vpc.Outputs.VpcId

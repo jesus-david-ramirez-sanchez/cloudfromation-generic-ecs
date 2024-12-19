@@ -1,6 +1,6 @@
 #!/bin/bash
 
-aws cloudformation deploy --template-file ./../../microservicio.yaml --stack-name most-wanted-dev-api --capabilities CAPABILITY_NAMED_IAM --profile clicoh-arg --parameter-overrides \
+aws cloudformation deploy --template-file ./../../microservicio.yaml --stack-name most-wanted-dev-api --capabilities CAPABILITY_NAMED_IAM --profile personal --parameter-overrides \
     ProjectName=most-wanted \
     EnvType=dev \
     MicroserviceName=api \
@@ -9,5 +9,5 @@ aws cloudformation deploy --template-file ./../../microservicio.yaml --stack-nam
     MicroservicePriority=1 \
     Healthcheck=api/healthcheck \
     PathService=api \
-    Initial=true \
+    Initial=false \
     MinContainers=1 MaxContainers=2
