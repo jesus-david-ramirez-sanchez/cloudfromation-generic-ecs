@@ -18,6 +18,8 @@ Parameters:
     Default: t3a.nano
   SSLCertificate:
     Type: String
+  Domain:
+    Type: String
 
 Conditions:
   IsDev: !Equals
@@ -45,6 +47,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
+        Domain: !Ref Domain
         ProjectName: !Ref ProjectName
         SSLCertificate: !Ref SSLCertificate
         VpcId: !If
