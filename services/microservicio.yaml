@@ -100,21 +100,6 @@ Resources:
                 - ecs-tasks.amazonaws.com
             Effect: Allow
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: "Allow"
-                Action:
-                  - s3:GetObject
-                Resource:
-                  - !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}/${MicroserviceName}/.env"
-              - Effect: "Allow"
-                Action:
-                  - s3:GetBucketLocation
-                Resource:
-                  - !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
@@ -175,10 +160,7 @@ Resources:
             - ContainerPort: !Ref MicroservicePort
           Environment:
             - Name: NODE_ENV
-              Value: !If [ IsProd, production, test ]
-          EnvironmentFiles:
-            - Value: !Sub "arn:aws:s3:::environment-${ProjectName}-${EnvType}/${MicroserviceName}/.env"
-              Type: s3
+              Value: !If [ IsProd, production, dev ]
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -192,12 +174,12 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Condition: IsNotInitial
     Properties:
-      Name: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, inter ] ]
+      Name: !Join [ "-", [ !Ref ProjectName, !Ref EnvType, !Ref MicroserviceName ] ]
       TargetType: instance
       Protocol: HTTP
       Port: !Ref MicroservicePort
       VpcId:
-        Fn::ImportValue: !Join [ "-", [ shipping, vpc ] ]
+        Fn::ImportValue: !Join [ "-", [ most-wanted, vpc ] ]
       HealthCheckPath: !Sub "/${Healthcheck}"
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 2
@@ -235,7 +217,7 @@ Resources:
         ]
       GroupDescription: !Sub "SecurityGroup for ${ProjectName}-${EnvType} Task for ${MicroserviceName}"
       VpcId:
-        Fn::ImportValue: !Join [ "-", [ shipping, vpc ] ]
+        Fn::ImportValue: !Join [ "-", [ most-wanted, vpc ] ]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: !Ref MicroservicePort

@@ -7,4 +7,4 @@ aws cloudformation deploy --template-file packaged.yaml --stack-name most-wanted
     minSize=1 \
     maxSize=5 \
     InstanceType=t3a.nano
-aws cloudformation update-termination-protection --stack-name most-wanted-dev --enable-termination-protection --profile personal
+# aws cloudformation update-termination-protection --stack-name most-wanted-dev --enable-termination-protection --profile personal

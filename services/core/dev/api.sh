@@ -4,10 +4,10 @@ aws cloudformation deploy --template-file ./../../microservicio.yaml --stack-nam
     ProjectName=most-wanted \
     EnvType=dev \
     MicroserviceName=api \
-    MemoryReservation=150 \
-    MicroservicePort=4050 \
+    MemoryReservation=100 \
+    MicroservicePort=8080 \
     MicroservicePriority=1 \
     Healthcheck=api/healthcheck \
     PathService=api \
-    Initial=false \
+    Initial=true \
     MinContainers=1 MaxContainers=2

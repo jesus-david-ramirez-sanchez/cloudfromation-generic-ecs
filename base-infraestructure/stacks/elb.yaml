@@ -55,13 +55,12 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
-      Protocol: HTTPS
+      Protocol: HTTP
       Port: 578
       DefaultActions:
         - Type: fixed-response
           FixedResponseConfig:
             StatusCode: "404"
-      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
 
 
 Outputs:
