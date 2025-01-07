@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  ProjectName:
+    Type: String
+  EnvType:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  InstanceType:
+    Type: String
+    Default: db.t2.small
+  DbEngine:
+    Type: String
+    Default: MySQL
+  MasterUsername:
+    Type: String
+    Default: UserMaster
+  MasterUserPassword:
+    Type: String
+    Default: passwordUser
+  DbPort:
+    Type: Number
+    Default: 3200
+
+Resources:
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Security Group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          Description: Acceso al Security group del cluster spot
+          FromPort: !Ref DbPort
+          ToPort: !Ref DbPort
+      VpcId: !Ref VpcId
+
+  DBSecurityGroup:
+    Type: AWS::RDS::DBSecurityGroup
+    Properties:
+      EC2VpcId: !Ref VpcId
+      DBSecurityGroupIngress:
+        EC2SecurityGroupName: !Ref RDSSecurityGroup
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBSecurityGroups: !Ref RDSSecurityGroup
+      AllocatedStorage: '5'
+      DBInstanceClass: !Ref InstanceType
+      Engine: !Ref DbEngine
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+    DeletionPolicy: Snapshot

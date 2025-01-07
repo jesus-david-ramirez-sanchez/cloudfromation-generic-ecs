@@ -43,6 +43,23 @@ Resources:
         ProjectName: !Ref ProjectName
       TemplateURL: stacks/vpc.yaml
 
+  RDS:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsDev
+    Properties:
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvType: !Ref EnvType
+        VpcId: !If
+          - IsDev
+          - !GetAtt vpc.Outputs.VpcId
+          - !ImportValue
+            Fn::Join:
+              - '-'
+              - - !Ref ProjectName
+                - vpc
+      TemplateURL: stacks/rds.yaml
+
   elb:
     Type: AWS::CloudFormation::Stack
     Properties:
